@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AI Voice Assistant</title>
+</head>
+<body>
+
+<h2>AI Voice Assistant (ML Project)</h2>
+
+<button onclick="startListening()">🎤 Speak</button>
+<p><b>You said:</b> <span id="userText"></span></p>
+<p><b>Assistant:</b> <span id="botText"></span></p>
+
+<script>
+const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+recognition.lang = "en-IN";
+
+function startListening() {
+  recognition.start();
+}
+
+recognition.onresult = async function(event) {
+  const text = event.results[0][0].transcript;
+  document.getElementById("userText").innerText = text;
+
+  const res = await fetch("/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: text })
+  });
+
+  const data = await res.json();
+  document.getElementById("botText").innerText = data.reply;
+
+  const speech = new SpeechSynthesisUtterance(data.reply);
+  speech.lang = "en-IN";
+  speechSynthesis.speak(speech);
+};
+</script>
+
+</body>
+</html>
