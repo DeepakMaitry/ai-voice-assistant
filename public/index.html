@@ -1,42 +1,330 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>AI Voice Assistant</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Voice Assistant — Demo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --muted:#9aa4b2;
+      --accent:#6ee7b7;
+      --glass: rgba(255,255,255,0.03);
+    }
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;
+      background: linear-gradient(180deg,#071029 0%, #071a2b 100%);
+      color:#e6eef6;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+
+    .card{
+      width:100%;
+      max-width:760px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:14px;
+      padding:22px;
+      box-shadow: 0 8px 30px rgba(2,6,23,0.6);
+      border:1px solid rgba(255,255,255,0.03);
+    }
+
+    header{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+    .logo{
+      width:56px;height:56px;border-radius:10px;background:linear-gradient(90deg,var(--accent),#60a5fa);display:flex;align-items:center;justify-content:center;font-weight:700;color:#052023;
+      box-shadow: 0 6px 18px rgba(102,126,234,0.08);
+      font-size:20px;
+    }
+    h1{margin:0;font-size:20px}
+    p.lead{margin:0;color:var(--muted);font-size:13px}
+
+    .controls{display:flex;gap:12px;align-items:center;margin-top:14px}
+    .mic-btn{
+      width:72px;height:72px;border-radius:999px;border:none;background:linear-gradient(180deg,#0ea5a4,#06b6d4);color:#042025;font-size:28px;
+      display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 24px rgba(6,182,212,0.12);
+      transition:transform .12s ease, box-shadow .12s ease;
+    }
+    .mic-btn:active{transform:scale(.97)}
+    .mic-btn[aria-pressed="true"]{box-shadow:0 12px 28px rgba(6,182,212,0.22); outline: none; animation: pulse 1.2s infinite;}
+    @keyframes pulse{
+      0%{box-shadow:0 0 0 0 rgba(6,182,212,0.12)}
+      70%{box-shadow:0 0 0 18px rgba(6,182,212,0)}
+      100%{box-shadow:0 0 0 0 rgba(6,182,212,0)}
+    }
+
+    .status{
+      font-size:13px;color:var(--muted);
+      display:flex;flex-direction:column;
+    }
+    .status .line{display:flex;gap:8px;align-items:center}
+    .dot{width:10px;height:10px;border-radius:50%;background:#ffeaa7;display:inline-block}
+
+    .transcript, .assistant{
+      margin-top:18px;
+      background:var(--glass);
+      padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.02);
+      color:#e6eef6;
+    }
+    .label{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .text{min-height:28px;font-size:15px}
+
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;color:var(--muted);font-size:13px}
+    .hint{opacity:.9}
+    .spinner{
+      width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,0.08);border-top-color:var(--accent);animation: spin .9s linear infinite;display:inline-block;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* small screens */
+    @media (max-width:520px){
+      .controls{flex-direction:column;align-items:flex-start}
+      .mic-btn{width:64px;height:64px}
+    }
+  </style>
 </head>
 <body>
+  <main class="card" role="main">
+    <header>
+      <div class="logo">AI</div>
+      <div>
+        <h1>AI Voice Assistant — Demo</h1>
+        <p class="lead">Real-time speech → Gemini → spoken reply. Localhost demo for college presentation.</p>
+      </div>
+    </header>
 
-<h2>AI Voice Assistant (ML Project)</h2>
+    <div class="controls">
+      <button id="mic" class="mic-btn" aria-pressed="false" title="Click to speak">🎤</button>
 
-<button onclick="startListening()">🎤 Speak</button>
-<p><b>You said:</b> <span id="userText"></span></p>
-<p><b>Assistant:</b> <span id="botText"></span></p>
+      <div class="status" aria-live="polite">
+        <div class="line"><strong id="state">Idle</strong></div>
+        <div class="line"><span class="dot" id="dot" style="background:#60a5fa"></span><small id="detail">Ready</small></div>
+      </div>
+    </div>
+
+    <div class="transcript" style="margin-top:18px">
+      <div class="label">You said</div>
+      <div id="userText" class="text" aria-live="polite">—</div>
+    </div>
+
+    <div class="assistant">
+      <div class="label">Assistant</div>
+      <div id="botText" class="text" aria-live="polite">—</div>
+    </div>
+
+    <div class="footer">
+      <div class="hint">Tip: Click the mic or press <kbd>Space</kbd> to start</div>
+      <div id="loader" style="visibility:hidden"><span class="spinner" title="processing"></span> Processing…</div>
+    </div>
+  </main>
 
 <script>
-const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-recognition.lang = "en-IN";
+/* ---------------------------
+   Configuration & globals
+   --------------------------- */
+const micButton = document.getElementById("mic");
+const userTextEl = document.getElementById("userText");
+const botTextEl = document.getElementById("botText");
+const stateEl = document.getElementById("state");
+const detailEl = document.getElementById("detail");
+const dotEl = document.getElementById("dot");
+const loaderEl = document.getElementById("loader");
 
-function startListening() {
-  recognition.start();
+let isListening = false;
+let isSpeaking = false;
+let selectedVoice = null;
+let voices = [];
+
+/* ---------------------------
+   Speech synthesis voices
+   --------------------------- */
+function loadVoices() {
+  voices = speechSynthesis.getVoices() || [];
+  // Preferred voice order
+  const prefer = ["google", "zira", "female", "amy", "samantha", "alloy"];
+  // find a good female-ish voice
+  selectedVoice = voices.find(v => {
+    const n = v.name.toLowerCase();
+    return prefer.some(p => n.includes(p));
+  }) || voices.find(v => v.lang && v.lang.toLowerCase().startsWith("en")) || null;
+}
+loadVoices();
+if (speechSynthesis.onvoiceschanged !== undefined) {
+  speechSynthesis.onvoiceschanged = () => { loadVoices(); };
 }
 
-recognition.onresult = async function(event) {
-  const text = event.results[0][0].transcript;
-  document.getElementById("userText").innerText = text;
+/* ---------------------------
+   Speech Recognition setup
+   --------------------------- */
+const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechAPI) {
+  stateEl.innerText = "Speech not supported";
+  detailEl.innerText = "Use Chrome/Edge on desktop for best results.";
+  micButton.disabled = true;
+} else {
+  var recognition = new SpeechAPI();
+  recognition.lang = "en-IN";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+}
 
-  const res = await fetch("/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: text })
-  });
+/* ---------------------------
+   UI helpers
+   --------------------------- */
+function setStatus(label, detail, color="#60a5fa") {
+  stateEl.innerText = label;
+  detailEl.innerText = detail;
+  dotEl.style.background = color;
+}
+function showLoader(on) {
+  loaderEl.style.visibility = on ? "visible" : "hidden";
+}
 
-  const data = await res.json();
-  document.getElementById("botText").innerText = data.reply;
+/* ---------------------------
+   Start / Stop listening
+   --------------------------- */
+micButton.addEventListener("click", toggleListening);
+document.addEventListener("keydown", (e) => {
+  // Space to toggle mic (prevent scroll)
+  if (e.code === "Space") {
+    e.preventDefault();
+    toggleListening();
+  }
+});
 
-  const speech = new SpeechSynthesisUtterance(data.reply);
-  speech.lang = "en-IN";
-  speechSynthesis.speak(speech);
-};
+function toggleListening(){
+  if (!SpeechAPI) return;
+  if (isListening) {
+    recognition.stop();
+  } else {
+    startListening();
+  }
+}
+
+function startListening(){
+  isListening = true;
+  micButton.setAttribute("aria-pressed","true");
+  setStatus("Listening...", "Speak now");
+  userTextEl.innerText = "—";
+  botTextEl.innerText = "—";
+  try {
+    recognition.start();
+  } catch (err) {
+    // some browsers throw if start is called repeatedly
+    console.warn("recognition.start() error", err);
+  }
+}
+
+/* ---------------------------
+   Recognition event handlers
+   --------------------------- */
+if (SpeechAPI) {
+  recognition.onstart = () => {
+    isListening = true;
+    micButton.setAttribute("aria-pressed","true");
+    setStatus("Listening...", "Speak now");
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    micButton.setAttribute("aria-pressed","false");
+    if (!isSpeaking) setStatus("Idle", "Ready", "#60a5fa");
+  };
+
+  recognition.onerror = (ev) => {
+    console.error("Speech recognition error", ev);
+    setStatus("Error", ev.error || "Recognition error", "#f97373");
+    micButton.setAttribute("aria-pressed","false");
+    isListening = false;
+  };
+
+  recognition.onresult = async function (event) {
+    const text = event.results[0][0].transcript;
+    userTextEl.innerText = text;
+    setStatus("Processing", "Contacting assistant", "#f59e0b");
+    showLoader(true);
+
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ message: text })
+      });
+
+      if (!res.ok) throw new Error("Network response not OK");
+
+      const data = await res.json();
+      const reply = (data && data.reply) ? data.reply : "Sorry, I couldn't reply.";
+
+      botTextEl.innerText = reply;
+      setStatus("Speaking", "Assistant reply", "#60a5fa");
+      speakText(reply);
+    } catch (err) {
+      console.error("Chat request failed", err);
+      botTextEl.innerText = "Error: Unable to get assistant reply.";
+      setStatus("Error", "Check server / network", "#f97373");
+    } finally {
+      showLoader(false);
+    }
+  };
+}
+
+/* ---------------------------
+   Speak function
+   --------------------------- */
+function speakText(text) {
+  if (!("speechSynthesis" in window)) {
+    console.warn("No speechSynthesis support");
+    return;
+  }
+
+  // ensure voices loaded
+  if (!voices.length) loadVoices();
+
+  const utter = new SpeechSynthesisUtterance(text);
+  if (selectedVoice) utter.voice = selectedVoice;
+
+  // tuning for more natural female-sounding voice
+  utter.rate = 0.95;
+  utter.pitch = 1.15;
+  utter.volume = 1.0;
+
+  isSpeaking = true;
+  speechSynthesis.cancel(); // cancel previous
+  // small delay to sound natural
+  setTimeout(() => {
+    speechSynthesis.speak(utter);
+  }, 350);
+
+  utter.onend = () => {
+    isSpeaking = false;
+    if (!isListening) setStatus("Idle", "Ready", "#60a5fa");
+    else setStatus("Listening...", "Speak now");
+  };
+  utter.onerror = (e) => {
+    console.error("Speech error", e);
+    isSpeaking = false;
+    setStatus("Idle", "Ready", "#f97373");
+  };
+}
+
+/* ---------------------------
+   Accessibility / quick checks
+   --------------------------- */
+window.addEventListener("load", () => {
+  // small voice warm-up
+  if (speechSynthesis.getVoices().length === 0) {
+    // sometimes voices appear after a delay
+    setTimeout(loadVoices, 300);
+  }
+  setStatus("Ready", "Click mic or press Space", "#60a5fa");
+});
 </script>
-
 </body>
 </html>
