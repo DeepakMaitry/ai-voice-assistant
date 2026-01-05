@@ -1,78 +1,80 @@
-// server.js — FINAL GUARANTEED VERSION (AI STUDIO COMPATIBLE)
-
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
+const { VertexAI } = require("@google-cloud/vertexai");
+const textToSpeech = require('@google-cloud/text-to-speech');
+
+// 🛑 STOP: Replace this with your ACTUAL Project ID from the json file
+const PROJECT_ID = "secure-medium-428315-a4"; 
+
+// 🔑 THE FIX: We force the environment variable to point to your key file
+// This tells the "Security Guard" exactly where your ID badge is.
+process.env.GOOGLE_APPLICATION_CREDENTIALS = path.join(__dirname, "google_key.json");
 
 const app = express();
-
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-if (!process.env.GEMINI_API_KEY) {
-  console.error("❌ GEMINI_API_KEY missing");
-  process.exit(1);
-}
+const LOCATION = "us-central1"; 
 
-// ✅ CORRECT ENDPOINT + MODEL FOR AI STUDIO
-// ✅ UPDATED: Using gemini-2.5-flash for faster voice response
-// Trying the 'latest' alias often fixes the 404 error
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+// Initialize Vertex AI
+const vertex_ai = new VertexAI({
+  project: PROJECT_ID,
+  location: LOCATION
+});
+
+// Use the standard "auto-updating" model name
+const generativeModel = vertex_ai.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+// Initialize Text-to-Speech
+const ttsClient = new textToSpeech.TextToSpeechClient();
+
+// --- HELPER: WAV Header ---
+function addWavHeader(pcmData, sampleRate = 24000, numChannels = 1, bitDepth = 16) {
+  const byteRate = (sampleRate * numChannels * bitDepth) / 8;
+  const blockAlign = (numChannels * bitDepth) / 8;
+  const dataSize = pcmData.length;
+  const fileSize = 36 + dataSize;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0); header.writeUInt32LE(fileSize, 4); header.write("WAVE", 8);
+  header.write("fmt ", 12); header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22); header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28); header.writeUInt16LE(blockAlign, 32); header.writeUInt16LE(bitDepth, 34);
+  header.write("data", 36); header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcmData]);
+}
 
 app.post("/chat", async (req, res) => {
   try {
     const userText = req.body.message;
+    console.log("📩 User said:", userText);
 
-    if (!userText || userText.trim() === "") {
-      return res.json({ reply: "I didn’t hear anything." });
-    }
+    // --- STEP 1: THINK (Vertex AI) ---
+    const textRequest = {
+      contents: [{ role: "user", parts: [{ text: `You are a conversational assistant. User said: "${userText}". Reply naturally in 1 sentence.` }] }],
+    };
+    
+    const textResult = await generativeModel.generateContent(textRequest);
+    const aiReply = textResult.response.candidates[0].content.parts[0].text;
+    console.log("💡 AI Thought:", aiReply);
 
-    const response = await fetch(
-      `${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `You are a friendly, calm, human-like female voice assistant.
-Reply naturally and politely.
+    // --- STEP 2: SPEAK (Cloud TTS) ---
+    const [audioResponse] = await ttsClient.synthesizeSpeech({
+      input: { text: aiReply },
+      voice: { languageCode: 'en-US', name: 'en-US-Journey-F' },
+      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 24000 },
+    });
 
-User said: ${userText}`
-                }
-              ]
-            }
-          ]
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!data.candidates || !data.candidates[0]) {
-      console.error("❌ Gemini API error:", data);
-      return res.json({
-        reply: "Sorry, I am having trouble responding right now."
-      });
-    }
-
-    const reply =
-      data.candidates[0].content.parts[0].text;
-
-    res.json({ reply });
+    console.log("✅ Audio generated (Cloud TTS).");
+    const wavBuffer = addWavHeader(audioResponse.audioContent, 24000);
+    res.json({ audio: wavBuffer.toString("base64") });
 
   } catch (error) {
-    console.error("❌ Server error:", error);
-    res.json({
-      reply: "Sorry, I am having trouble responding right now."
-    });
+    console.error("❌ Error:", error);
+    res.json({ error: "Server error" });
   }
 });
 
 app.listen(3000, () => {
-  console.log("🚀 Server running at http://localhost:3000");
+  console.log("🚀 Vertex AI Server running at http://localhost:3000");
 });
