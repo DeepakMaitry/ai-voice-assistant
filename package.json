@@ -12,10 +12,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "jslint": "^0.12.1",
-    "node-fetch": "^3.3.2"
+    "jslint": "^0.12.1"
   },
   "repository": {
     "type": "git",

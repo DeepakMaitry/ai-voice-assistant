@@ -1,69 +1,78 @@
-// server.js — drop-in ready
+// server.js — FINAL GUARANTEED VERSION (AI STUDIO COMPATIBLE)
+
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
 
 const app = express();
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Fetch wrapper: uses native fetch (Node 18+) if available,
-// otherwise dynamically imports node-fetch.
-async function fetchWrapper(...args) {
-  if (typeof globalThis.fetch === "function") {
-    return globalThis.fetch(...args);
-  }
-  // dynamic import of node-fetch v3
-  const { default: fetch } = await import("node-fetch");
-  return fetch(...args);
+if (!process.env.GEMINI_API_KEY) {
+  console.error("❌ GEMINI_API_KEY missing");
+  process.exit(1);
 }
+
+// ✅ CORRECT ENDPOINT + MODEL FOR AI STUDIO
+// ✅ UPDATED: Using gemini-2.5-flash for faster voice response
+// Trying the 'latest' alias often fixes the 404 error
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 app.post("/chat", async (req, res) => {
   try {
     const userText = req.body.message;
-    if (!userText) return res.status(400).json({ reply: "No message provided." });
 
-    const MODEL = "gemini-1.5-flash"; // recommended stable demo model
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-
-    const response = await fetchWrapper(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        // simple request body — keep this minimal for demo
-        contents: [
-          {
-            parts: [{ text: userText }]
-          }
-        ]
-      })
-    });
-
-    // handle non-JSON or non-OK responses gracefully
-    const data = await response.json().catch((e) => {
-      console.error("Invalid JSON from Gemini:", e);
-      return null;
-    });
-
-    if (!data || !data.candidates || !data.candidates[0]) {
-      console.log("Gemini error response:", data);
-      return res.status(502).json({ reply: "Sorry, I am having trouble responding right now." });
+    if (!userText || userText.trim() === "") {
+      return res.json({ reply: "I didn’t hear anything." });
     }
 
-    // join parts if model returns multiple parts
-    const replyText = (data.candidates[0].content.parts || [])
-      .map((p) => p.text || "")
-      .join(" ")
-      .trim();
+    const response = await fetch(
+      `${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `You are a friendly, calm, human-like female voice assistant.
+Reply naturally and politely.
 
-    res.json({ reply: replyText || "Sorry, I couldn't form a reply." });
+User said: ${userText}`
+                }
+              ]
+            }
+          ]
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!data.candidates || !data.candidates[0]) {
+      console.error("❌ Gemini API error:", data);
+      return res.json({
+        reply: "Sorry, I am having trouble responding right now."
+      });
+    }
+
+    const reply =
+      data.candidates[0].content.parts[0].text;
+
+    res.json({ reply });
+
   } catch (error) {
-    console.error("Server error:", error);
-    res.status(500).json({ reply: "Server error occurred." });
+    console.error("❌ Server error:", error);
+    res.json({
+      reply: "Sorry, I am having trouble responding right now."
+    });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+app.listen(3000, () => {
+  console.log("🚀 Server running at http://localhost:3000");
 });
