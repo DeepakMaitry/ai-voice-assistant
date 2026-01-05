@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Voice Assistant — Continuous Mode</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body { background: #000; color: white; font-family: 'Inter', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #555; margin-bottom: 20px; transition: 0.3s; }
+    .status-dot.listening { background: #ef4444; box-shadow: 0 0 15px #ef4444; }
+    .status-dot.speaking { background: #22c55e; box-shadow: 0 0 15px #22c55e; }
+    
+    .mic-btn {
+      width: 100px; height: 100px; border-radius: 50%; font-size: 40px; border: none; cursor: pointer;
+      background: #333; color: white; transition: all 0.3s;
+    }
+    .mic-btn.active { background: #ef4444; animation: pulse 1s infinite; }
+    
+    #stop-btn {
+      margin-top: 20px; padding: 10px 20px; border-radius: 20px; border: 1px solid #333; 
+      background: transparent; color: #888; cursor: pointer; display: none;
+    }
+    #stop-btn:hover { color: white; border-color: white; }
+
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+    p { color: #888; margin-top: 10px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <div id="dot" class="status-dot"></div>
+  <button id="mic" class="mic-btn">🎙️</button>
+  <p id="status">Tap to start chat</p>
+  <button id="stop-btn">Stop Conversation</button>
+
+<script>
+const micBtn = document.getElementById("mic");
+const stopBtn = document.getElementById("stop-btn");
+const statusEl = document.getElementById("status");
+const dotEl = document.getElementById("dot");
+
+let isConversationActive = false; // Controls the loop
+
+// Setup Speech Recognition
+const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = new SpeechAPI();
+recognition.lang = "en-US";
+recognition.interimResults = false;
+
+// START BUTTON
+micBtn.addEventListener("click", () => {
+  isConversationActive = true;
+  stopBtn.style.display = "block"; // Show stop button
+  startListening();
+});
+
+// STOP BUTTON
+stopBtn.addEventListener("click", () => {
+  isConversationActive = false;
+  recognition.stop();
+  stopBtn.style.display = "none";
+  statusEl.innerText = "Conversation stopped.";
+  dotEl.className = "status-dot";
+  micBtn.classList.remove("active");
+});
+
+function startListening() {
+  if (!isConversationActive) return;
+  
+  try {
+    recognition.start();
+    micBtn.classList.add("active");
+    dotEl.className = "status-dot listening";
+    statusEl.innerText = "Listening...";
+  } catch (e) {
+    console.log("Mic already on");
+  }
+}
+
+recognition.onend = () => {
+  if (isConversationActive && statusEl.innerText === "Listening...") {
+    // If it stopped but we didn't get results (silence), restart
+    startListening();
+  }
+};
+
+recognition.onresult = async (event) => {
+  const text = event.results[0][0].transcript;
+  micBtn.classList.remove("active");
+  dotEl.className = "status-dot";
+  statusEl.innerText = "Thinking...";
+
+  // Send to Gemini
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text })
+    });
+    
+    const data = await res.json();
+    
+    if (data.audio) {
+      statusEl.innerText = "Assistant Speaking...";
+      dotEl.className = "status-dot speaking";
+      playAudio(data.audio);
+    }
+
+  } catch (err) {
+    console.error(err);
+    statusEl.innerText = "Error. Retrying...";
+    setTimeout(startListening, 2000);
+  }
+};
+
+function playAudio(base64) {
+  const audio = new Audio("data:audio/wav;base64," + base64);
+  
+  audio.onended = () => {
+    // 💡 THE LOOP: Once audio finishes, start listening again
+    dotEl.className = "status-dot";
+    if (isConversationActive) {
+      setTimeout(startListening, 500); // Small pause before listening
+    }
+  };
+  
+  audio.play();
+}
+</script>
+</body>
+</html>
