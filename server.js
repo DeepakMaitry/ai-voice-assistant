@@ -1,86 +1,117 @@
-require("dotenv").config();
-const express = require("express");
-const path = require("path");
-const { VertexAI } = require("@google-cloud/vertexai");
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
+const { VertexAI } = require('@google-cloud/vertexai');
 const textToSpeech = require('@google-cloud/text-to-speech');
 
-// 🛑 STOP: Replace this with your ACTUAL Project ID from the json file
-const PROJECT_ID = "secure-medium-428315-a4"; 
-
-// 🔑 THE FIX: We force the environment variable to point to your key file
-// This tells the "Security Guard" exactly where your ID badge is.
-process.env.GOOGLE_APPLICATION_CREDENTIALS = path.join(__dirname, "google_key.json");
-
 const app = express();
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+const server = http.createServer(app);
+const io = new Server(server);
+const port = 3000;
 
-const LOCATION = "us-central1"; 
+app.use(express.static('public'));
 
-// Initialize Vertex AI
+// ---------------------------------------------------------
+// 1. SETUP PAID GOOGLE CLOUD VERTEX AI (Using Key File)
+// ---------------------------------------------------------
 const vertex_ai = new VertexAI({
-  project: PROJECT_ID,
-  location: LOCATION
-});
-
-// Use the standard "auto-updating" model name
-const generativeModel = vertex_ai.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    systemInstruction: {
-        role: 'system',
-        parts: [{"text": "You are a helpful voice assistant. Keep your replies very short, concise, and conversational (under 3 sentences). Do not use bullet points or special formatting."}]
+    project: 'secure-medium-428315-a4',
+    location: 'us-central1',
+    googleAuthOptions: {
+        keyFile: './google_key.json' // <--- This loads your downloaded ID Card!
     }
 });
 
-// Initialize Text-to-Speech
-const ttsClient = new textToSpeech.TextToSpeechClient();
-
-// --- HELPER: WAV Header ---
-function addWavHeader(pcmData, sampleRate = 24000, numChannels = 1, bitDepth = 16) {
-  const byteRate = (sampleRate * numChannels * bitDepth) / 8;
-  const blockAlign = (numChannels * bitDepth) / 8;
-  const dataSize = pcmData.length;
-  const fileSize = 36 + dataSize;
-  const header = Buffer.alloc(44);
-  header.write("RIFF", 0); header.writeUInt32LE(fileSize, 4); header.write("WAVE", 8);
-  header.write("fmt ", 12); header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(numChannels, 22); header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(byteRate, 28); header.writeUInt16LE(blockAlign, 32); header.writeUInt16LE(bitDepth, 34);
-  header.write("data", 36); header.writeUInt32LE(dataSize, 40);
-  return Buffer.concat([header, pcmData]);
-}
-
-app.post("/chat", async (req, res) => {
-  try {
-    const userText = req.body.message;
-    console.log("📩 User said:", userText);
-
-    // --- STEP 1: THINK (Vertex AI) ---
-    const textRequest = {
-      contents: [{ role: "user", parts: [{ text: `You are a conversational assistant. User said: "${userText}". Reply naturally in 1 sentence.` }] }],
-    };
-    
-    const textResult = await generativeModel.generateContent(textRequest);
-    const aiReply = textResult.response.candidates[0].content.parts[0].text;
-    console.log("💡 AI Thought:", aiReply);
-
-    // --- STEP 2: SPEAK (Cloud TTS) ---
-    const [audioResponse] = await ttsClient.synthesizeSpeech({
-      input: { text: aiReply },
-      voice: { languageCode: 'en-US', name: 'en-US-Journey-F' },
-      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 24000 },
-    });
-
-    console.log("✅ Audio generated (Cloud TTS).");
-    const wavBuffer = addWavHeader(audioResponse.audioContent, 24000);
-    res.json({ audio: wavBuffer.toString("base64") });
-
-  } catch (error) {
-    console.error("❌ Error:", error);
-    res.json({ error: "Server error" });
-  }
+const model = "gemini-2.5-flash"; // The paid, standard model
+const generativeModel = vertex_ai.getGenerativeModel({
+    model: model,
+    systemInstruction: {
+        role: 'system',
+        parts: [{"text": "You are a helpful voice assistant. Keep your replies conversational and under 2 sentences."}]
+    }
 });
 
-app.listen(3000, () => {
-  console.log("🚀 Vertex AI Server running at http://localhost:3000");
+// ---------------------------------------------------------
+// 2. SETUP VOICE BOX (Google Cloud TTS)
+// ---------------------------------------------------------
+// We also tell the Voice Box to use the same Key File
+const ttsClient = new textToSpeech.TextToSpeechClient({
+    keyFilename: './google_key.json' 
+});
+
+async function generateAudio(text) {
+    const request = {
+        input: { text: text },
+        voice: { languageCode: 'en-US', name: 'en-US-Journey-F' },
+        audioConfig: { audioEncoding: 'MP3' },
+    };
+    const [response] = await ttsClient.synthesizeSpeech(request);
+    return response.audioContent;
+}
+
+// ---------------------------------------------------------
+// 3. THE REAL-TIME STREAMING ENGINE
+// ---------------------------------------------------------
+io.on('connection', (socket) => {
+    console.log('⚡ User connected');
+
+    socket.on('user_message', async (data) => {
+        const userText = data.message;
+        console.log(`📩 User said: ${userText}`);
+
+        try {
+            // A. Start the Stream (Brain 1)
+            const result = await generativeModel.generateContentStream({
+                contents: [{ role: 'user', parts: [{ text: userText }] }],
+            });
+
+            let buffer = ""; 
+
+            // B. Process stream
+            for await (const item of result.stream) {
+                // Vertex AI structure is slightly different than AI Studio
+                if (item.candidates && item.candidates[0].content && item.candidates[0].content.parts) {
+                    const chunkText = item.candidates[0].content.parts[0].text;
+                    process.stdout.write(chunkText); // Print to terminal
+                    buffer += chunkText;
+
+                    // C. Check for full sentences
+                    let sentenceEnd = buffer.search(/[.!?]+/);
+                    while (sentenceEnd !== -1) {
+                        let sentence = buffer.substring(0, sentenceEnd + 1).trim();
+                        buffer = buffer.substring(sentenceEnd + 1);
+
+                        if (sentence.length > 0) {
+                            const audioContent = await generateAudio(sentence);
+                            socket.emit('ai_audio_chunk', { 
+                                text: sentence, 
+                                audio: audioContent.toString('base64') 
+                            });
+                        }
+                        sentenceEnd = buffer.search(/[.!?]+/);
+                    }
+                }
+            }
+
+            // Leftovers
+            if (buffer.trim().length > 0) {
+                const audioContent = await generateAudio(buffer);
+                socket.emit('ai_audio_chunk', { 
+                    text: buffer, 
+                    audio: audioContent.toString('base64') 
+                });
+            }
+
+            socket.emit('ai_response_complete');
+            console.log("\n✅ Done.");
+
+        } catch (error) {
+            console.error('❌ Error:', error);
+        }
+    });
+});
+
+server.listen(port, () => {
+    console.log(`🚀 Vertex AI Streaming Server running at http://localhost:${port}`);
 });
