@@ -3,178 +3,375 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Assistant (Continuous)</title>
+    <title>Voice Assistant</title>
     <script src="/socket.io/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            /* Premium Palette */
+            --bg-body: #0a0a0a;       /* Deepest Black */
+            --bg-card: #111111;       /* Matte Dark Grey */
+            --border-thick: #333333;  /* Thick, solid border */
+            --accent-primary: #ffffff; /* Stark White for high contrast */
+            --accent-secondary: #888888; /* Muted Grey */
+            --button-gradient: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+            --button-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            --msg-user: #222222;
+            --msg-ai: #000000;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
-            font-family: 'Segoe UI', sans-serif;
-            background-color: #f0f2f5;
+            background-color: var(--bg-body);
+            color: var(--accent-primary);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* --- Main Interface Card --- */
+        .interface-container {
+            width: 100%;
+            max-width: 700px; /* Slightly narrower for focus */
+            height: 85vh;
+            background: var(--bg-card);
+            /* The requested "Thick Border" */
+            border: 3px solid var(--border-thick);
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* --- Minimal Header --- */
+        header {
+            padding: 25px;
+            display: flex;
+            justify-content: center;
+            border-bottom: 1px solid #222;
+        }
+
+        #status-text {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--accent-secondary);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            transition: color 0.3s ease;
+        }
+
+        /* --- Chat Area --- */
+        #transcript {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scroll-behavior: smooth;
+            background: 
+                radial-gradient(circle at 50% 50%, #151515 0%, #111111 100%);
+        }
+
+        /* Scrollbar styling for that "App" feel */
+        #transcript::-webkit-scrollbar { width: 6px; }
+        #transcript::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        .message {
+            max-width: 85%;
+            padding: 16px 20px;
+            border-radius: 18px;
+            font-size: 1rem;
+            line-height: 1.6;
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+        }
+
+        .user-msg {
+            align-self: flex-end;
+            background: var(--accent-primary); /* White bubble */
+            color: #000; /* Black text */
+            border-bottom-right-radius: 4px;
+            font-weight: 500;
+        }
+
+        .ai-msg {
+            align-self: flex-start;
+            background: transparent;
+            color: #ccc;
+            border: 1px solid #333; /* Subtle outline */
+            border-bottom-left-radius: 4px;
+        }
+
+        /* --- Controls Area --- */
+        .controls-area {
+            padding: 30px;
+            background: #0e0e0e;
+            border-top: 1px solid #222;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
+            gap: 15px;
         }
-        #status {
-            font-size: 1.5rem;
-            margin-bottom: 20px;
+
+        .dynamic-feedback {
+            font-size: 0.85rem;
             color: #555;
-            font-weight: bold;
-            height: 30px;
+            height: 20px;
+            font-weight: 500;
         }
-        .controls {
-            display: flex;
-            gap: 20px;
-        }
-        button {
+
+        /* --- The Realistic "Shape" Button --- */
+        .main-btn {
+            appearance: none;
+            width: 100%;
+            max-width: 280px;
+            padding: 18px 0;
             border: none;
-            padding: 15px 30px;
-            font-size: 1.2rem;
-            border-radius: 50px;
+            border-radius: 16px; /* Realistic rounded rect */
+            
+            /* Realistic Gradient & Shadow */
+            background: var(--accent-primary);
+            box-shadow: 
+                0 4px 0 #cccccc, /* The 3D "side" of the button */
+                0 10px 20px rgba(0,0,0,0.3); /* Drop shadow */
+            
+            color: #000;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: all 0.3s;
-        }
-        #startBtn {
-            background-color: #4285F4;
-            color: white;
-        }
-        #startBtn:hover { background-color: #357ae8; }
-        
-        #stopBtn {
-            background-color: #EA4335;
-            color: white;
-            display: none; /* Hidden at first */
-        }
-        #stopBtn:hover { background-color: #c5221f; }
-
-        .listening {
-            box-shadow: 0 0 15px rgba(66, 133, 244, 0.5);
-            transform: scale(1.05);
+            transition: all 0.1s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
         }
 
-        #transcript {
-            margin-top: 30px;
-            padding: 20px;
-            background: white;
-            border-radius: 10px;
-            width: 80%;
-            max-width: 600px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            min-height: 100px;
-            max-height: 300px;
-            overflow-y: auto;
+        /* Button Press Effect */
+        .main-btn:active {
+            transform: translateY(4px); /* Moves down */
+            box-shadow: 
+                0 0 0 #cccccc, /* Side disappears */
+                0 2px 5px rgba(0,0,0,0.3);
         }
-        p { margin: 10px 0; }
+
+        .main-btn:hover {
+            background: #f0f0f0;
+        }
+
+        /* Stop State */
+        .main-btn.stop-mode {
+            background: #ff3b30; /* Apple System Red */
+            color: white;
+            box-shadow: 
+                0 4px 0 #c21c13,
+                0 10px 20px rgba(255, 59, 48, 0.2);
+        }
+        .main-btn.stop-mode:active {
+            box-shadow: 0 0 0 #c21c13;
+        }
+
+        /* --- Animations --- */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); scale: 0.98; }
+            to { opacity: 1; transform: translateY(0); scale: 1; }
+        }
+
+        .typing-indicator::after {
+            content: '...';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
     </style>
 </head>
 <body>
 
-    <div id="status">Ready to Talk</div>
-    
-    <div class="controls">
-        <button id="startBtn">Start Conversation</button>
-        <button id="stopBtn">Stop</button>
-    </div>
+    <div class="interface-container">
+        <header>
+            <div id="status-text">Standby</div>
+        </header>
 
-    <div id="transcript"></div>
+        <div id="transcript">
+            <div class="message ai-msg" id="intro-msg">
+                Hey, I am ready to talk.
+            </div>
+        </div>
+
+        <div class="controls-area">
+            <div class="dynamic-feedback" id="feedback-text"></div>
+            
+            <button id="toggleBtn" class="main-btn">
+                Start Conversation
+            </button>
+        </div>
+    </div>
 
     <script>
         const socket = io();
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const status = document.getElementById('status');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const statusText = document.getElementById('status-text');
+        const feedbackText = document.getElementById('feedback-text');
         const transcript = document.getElementById('transcript');
+        const introMsg = document.getElementById('intro-msg');
 
         let recognition;
         let audioQueue = [];
         let isPlaying = false;
-        let isConversationActive = false; // Controls the loop
+        let isConversationActive = false;
 
-        // 1. Setup Ears (Speech Recognition)
+        // --- Rotating "Idle" Text Logic ---
+        const idlePhrases = [
+            "Ready whenever you are.",
+            "Just press start to chat.",
+            "I'm listening...",
+            "Silence is golden, but talking is fun."
+        ];
+        let idleInterval;
+
+        function startIdleRotation() {
+            let i = 0;
+            // Immediate change after the first static message
+            setTimeout(() => {
+                if(!isConversationActive) introMsg.innerText = idlePhrases[0];
+            }, 4000); 
+
+            // Rotate every 5 seconds
+            idleInterval = setInterval(() => {
+                if (!isConversationActive) {
+                    i = (i + 1) % idlePhrases.length;
+                    // Only update the last message if it's the intro message
+                    // (Simple logic: if user hasn't spoken yet)
+                    if (transcript.children.length === 1) {
+                        introMsg.innerText = idlePhrases[i];
+                    }
+                }
+            }, 5000);
+        }
+        
+        startIdleRotation();
+
+        // --- UI Helpers ---
+        function setButtonState(state) {
+            if (state === 'listening') {
+                toggleBtn.innerText = "Stop Conversation";
+                toggleBtn.classList.add('stop-mode');
+                feedbackText.innerText = "Listening...";
+                statusText.innerText = "Active";
+                statusText.style.color = "#4cd964"; // Green
+            } else if (state === 'speaking') {
+                feedbackText.innerText = "AI is speaking...";
+            } else if (state === 'idle') {
+                toggleBtn.innerText = "Start Conversation";
+                toggleBtn.classList.remove('stop-mode');
+                feedbackText.innerText = "";
+                statusText.innerText = "Standby";
+                statusText.style.color = "#888";
+            }
+        }
+
+        function appendMessage(sender, text, cssClass) {
+            // Check if appending to existing AI message
+            if (sender === 'AI' && document.getElementById('current-ai-text')) {
+                document.getElementById('current-ai-text').innerText += " " + text;
+            } else {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${cssClass}`;
+                
+                if (sender === 'AI') {
+                    msgDiv.innerHTML = `<span id="current-ai-text">${text}</span>`;
+                } else {
+                    msgDiv.innerText = text;
+                }
+                
+                transcript.appendChild(msgDiv);
+            }
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        // --- 1. Speech Recognition ---
         if ('webkitSpeechRecognition' in window) {
             recognition = new webkitSpeechRecognition();
-            recognition.continuous = false; // We restart it manually
+            recognition.continuous = false;
             recognition.lang = 'en-US';
 
             recognition.onstart = () => {
-                status.innerText = "Listening... 👂";
-                startBtn.classList.add('listening');
+                setButtonState('listening');
             };
 
             recognition.onend = () => {
-                startBtn.classList.remove('listening');
-                // Note: We do NOT restart here yet. We wait for AI to finish speaking.
+                if (!isPlaying && !isConversationActive) {
+                    setButtonState('idle');
+                }
             };
 
             recognition.onresult = (event) => {
                 const text = event.results[0][0].transcript;
-                status.innerText = "Thinking... 🧠";
-                transcript.innerHTML += `<p><strong>You:</strong> ${text}</p>`;
-                
-                // Send to Brain
+                feedbackText.innerText = "Processing...";
+                appendMessage('User', text, 'user-msg');
                 socket.emit('user_message', { message: text });
             };
         } else {
-            alert("Please use Google Chrome for this.");
+            alert("This interface requires Google Chrome.");
         }
 
-        // 2. Button Logic
-        startBtn.onclick = () => {
-            isConversationActive = true;
-            startBtn.style.display = 'none';
-            stopBtn.style.display = 'block';
-            recognition.start();
-        };
-
-        stopBtn.onclick = () => {
-            isConversationActive = false;
-            startBtn.style.display = 'block';
-            stopBtn.style.display = 'none';
-            status.innerText = "Conversation Ended.";
-            recognition.stop();
-        };
-
-        // 3. Handle Incoming Voice (The Loop)
-        socket.on('ai_audio_chunk', (data) => {
-            // Display text
-            if (!document.getElementById('current-ai-text')) {
-                transcript.innerHTML += `<p><strong>AI:</strong> <span id="current-ai-text"></span></p>`;
+        // --- 2. Button Logic ---
+        toggleBtn.onclick = () => {
+            if (!isConversationActive) {
+                // START
+                isConversationActive = true;
+                clearInterval(idleInterval); // Stop rotating text
+                recognition.start();
+            } else {
+                // STOP
+                isConversationActive = false;
+                recognition.stop();
+                setButtonState('idle');
+                // Restart rotation if you want, or leave it
             }
-            document.getElementById('current-ai-text').innerText += " " + data.text;
+        };
 
-            // Play Audio
+        // --- 3. Socket Events ---
+        socket.on('ai_audio_chunk', (data) => {
+            appendMessage('AI', data.text, 'ai-msg');
             audioQueue.push(data.audio);
             playNextChunk();
         });
 
         socket.on('ai_response_complete', () => {
-            // Remove the ID so next response starts a new line
             const oldText = document.getElementById('current-ai-text');
             if (oldText) oldText.removeAttribute('id');
         });
 
+        // --- 4. Audio Player ---
         function playNextChunk() {
             if (isPlaying || audioQueue.length === 0) {
-                // If queue is empty AND we are not playing AND conversation is active...
                 if (!isPlaying && audioQueue.length === 0 && isConversationActive) {
-                    // ...Restart the Mic! (The Loop)
-                    status.innerText = "My turn finished. Listening again...";
+                    setButtonState('listening');
                     try { recognition.start(); } catch(e) {}
                 }
                 return;
             }
 
             isPlaying = true;
-            status.innerText = "Speaking... 🗣️";
+            setButtonState('speaking');
             
             const audioData = audioQueue.shift();
             const audio = new Audio("data:audio/mp3;base64," + audioData);
 
             audio.onended = () => {
                 isPlaying = false;
-                // Recursive call to play next chunk OR restart mic
                 playNextChunk(); 
             };
 
