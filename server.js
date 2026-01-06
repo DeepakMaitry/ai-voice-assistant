@@ -19,11 +19,11 @@ const vertex_ai = new VertexAI({
     project: 'secure-medium-428315-a4',
     location: 'us-central1',
     googleAuthOptions: {
-        keyFile: './google_key.json' // <--- This loads your downloaded ID Card!
+        keyFile: './google_key.json' 
     }
 });
 
-const model = "gemini-2.5-flash"; // The paid, standard model
+const model = "gemini-2.5-flash"; 
 const generativeModel = vertex_ai.getGenerativeModel({
     model: model,
     systemInstruction: {
@@ -35,7 +35,6 @@ const generativeModel = vertex_ai.getGenerativeModel({
 // ---------------------------------------------------------
 // 2. SETUP VOICE BOX (Google Cloud TTS)
 // ---------------------------------------------------------
-// We also tell the Voice Box to use the same Key File
 const ttsClient = new textToSpeech.TextToSpeechClient({
     keyFilename: './google_key.json' 
 });
@@ -51,7 +50,7 @@ async function generateAudio(text) {
 }
 
 // ---------------------------------------------------------
-// 3. THE REAL-TIME STREAMING ENGINE
+// 3. THE REAL-TIME STREAMING ENGINE (With Speed Fix)
 // ---------------------------------------------------------
 io.on('connection', (socket) => {
     console.log('⚡ User connected');
@@ -70,31 +69,33 @@ io.on('connection', (socket) => {
 
             // B. Process stream
             for await (const item of result.stream) {
-                // Vertex AI structure is slightly different than AI Studio
                 if (item.candidates && item.candidates[0].content && item.candidates[0].content.parts) {
                     const chunkText = item.candidates[0].content.parts[0].text;
                     process.stdout.write(chunkText); // Print to terminal
                     buffer += chunkText;
 
-                    // C. Check for full sentences
-                    let sentenceEnd = buffer.search(/[.!?]+/);
+                    // C. SPEED FIX: Check for full sentences OR Commas
+                    // We look for: . ! ? ,
+                    let sentenceEnd = buffer.search(/[.!?,]+/);
+
                     while (sentenceEnd !== -1) {
                         let sentence = buffer.substring(0, sentenceEnd + 1).trim();
                         buffer = buffer.substring(sentenceEnd + 1);
 
-                        if (sentence.length > 0) {
+                        // Only speak if it's a real phrase (longer than 2 letters) to avoid glitches
+                        if (sentence.length > 2) {
                             const audioContent = await generateAudio(sentence);
                             socket.emit('ai_audio_chunk', { 
                                 text: sentence, 
                                 audio: audioContent.toString('base64') 
                             });
                         }
-                        sentenceEnd = buffer.search(/[.!?]+/);
+                        sentenceEnd = buffer.search(/[.!?,]+/);
                     }
                 }
             }
 
-            // Leftovers
+            // Leftovers (Whatever is left in the buffer at the end)
             if (buffer.trim().length > 0) {
                 const audioContent = await generateAudio(buffer);
                 socket.emit('ai_audio_chunk', { 
